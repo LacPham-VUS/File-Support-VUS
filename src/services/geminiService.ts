@@ -61,7 +61,8 @@ async function getTuningFromGemini(imageDataUrl: string): Promise<RedDetectionTu
 
     const prompt =
       'You will receive a scanned document image that contains red teacher markings (ticks, circles, underlines). ' +
-      'Return ONLY valid JSON (no markdown) with recommended HSV thresholds to detect red ink while keeping black text. ' +
+      'Remove ONLY the handwriting/annotation strokes while preserving any structural red elements such as printed borders, layout frames, or decorative headings. ' +
+      'Return ONLY valid JSON (no markdown) with recommended HSV thresholds to detect those red ink markings while keeping black text and the original red layout. ' +
       'Schema: {"sMin":0..1,"vMin":0..1,"hueA":[0..360,0..360],"hueB":[0..360,0..360],"dilateRadius":0..3,"inpaintRadius":1..5}. ' +
       'Use hue ranges around red (near 0 and near 360).';
 
