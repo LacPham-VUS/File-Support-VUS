@@ -76,6 +76,7 @@ const PDFProcessor: React.FC = () => {
   const [isGlobalProcessing, setIsGlobalProcessing] = useState<boolean>(false);
   const [isDownloadingAll, setIsDownloadingAll] = useState<boolean>(false);
   const [zoomOverlay, setZoomOverlay] = useState<{ src: string; title: string } | null>(null);
+  const [fileSearchQuery, setFileSearchQuery] = useState<string>('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const activeFile = useMemo(() => {
@@ -87,6 +88,12 @@ const PDFProcessor: React.FC = () => {
   const activeState = activeFile
     ? fileStates[activeFile.id] ?? createInitialFileState()
     : createInitialFileState();
+
+  const filteredFiles = useMemo(() => {
+    const query = fileSearchQuery.trim().toLowerCase();
+    if (!query) return uploadedFiles;
+    return uploadedFiles.filter((file) => file.name.toLowerCase().includes(query));
+  }, [uploadedFiles, fileSearchQuery]);
 
   const anyFileProcessing = useMemo(() => {
     if (isGlobalProcessing) return true;
@@ -436,6 +443,9 @@ const PDFProcessor: React.FC = () => {
   });
   const downloadAllDisabled = isGlobalProcessing || isDownloadingAll || !hasAnyProcessed;
   const resetDisabled = anyFileProcessing || (uploadedFiles.length === 0 && !zoomOverlay && !globalError);
+  const fileCountLabel = filteredFiles.length === uploadedFiles.length
+    ? `${uploadedFiles.length} file`
+    : `${filteredFiles.length}/${uploadedFiles.length} file`;
 
   const handlePreviewChange = (direction: number) => {
     if (!activeFile) return;
@@ -578,8 +588,8 @@ const PDFProcessor: React.FC = () => {
                   {isGlobalProcessing
                     ? '🌀 Đang xử lý tất cả file...'
                     : uploadedFiles.length > 1
-                      ? '🤖 Xóa đường đỏ tất cả file'
-                      : '🤖 Xóa đường đỏ file này'}
+                      ? '🤖 Xóa vết chấm của giáo viên trên tất cả file'
+                      : '🤖 Xóa vết chấm của giáo viên trên file này'}
                 </button>
 
                 {previewImage && (
@@ -625,10 +635,29 @@ const PDFProcessor: React.FC = () => {
             <div className="file-sidebar__inner">
               <div className="file-sidebar__header">
                 <h3>Danh sách file</h3>
-                <span>{uploadedFiles.length} file</span>
+                <span>{fileCountLabel}</span>
+              </div>
+              <div className="file-sidebar__search">
+                <input
+                  type="text"
+                  value={fileSearchQuery}
+                  placeholder="Tìm theo tên file..."
+                  onChange={(event) => setFileSearchQuery(event.target.value)}
+                  aria-label="Tìm kiếm file theo tên"
+                />
+                {fileSearchQuery && (
+                  <button
+                    type="button"
+                    className="file-sidebar__clear"
+                    onClick={() => setFileSearchQuery('')}
+                    aria-label="Xóa từ khóa tìm kiếm"
+                  >
+                    ✕
+                  </button>
+                )}
               </div>
               <div className="file-sidebar__list">
-                {uploadedFiles.map((file) => {
+                {filteredFiles.length ? filteredFiles.map((file) => {
                   const state = fileStates[file.id] ?? createInitialFileState();
                   const hasResult = getImageSources(state).length > 0;
                   const sidebarStatus = state.isBatchProcessing
@@ -691,7 +720,9 @@ const PDFProcessor: React.FC = () => {
                       )}
                     </button>
                   );
-                })}
+                }) : (
+                  <div className="file-sidebar__empty">Không tìm thấy file phù hợp.</div>
+                )}
               </div>
             </div>
           </aside>

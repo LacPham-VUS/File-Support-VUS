@@ -184,12 +184,59 @@
   color: #2c3e50;
 }
 
+.file-sidebar__search {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.file-sidebar__search input {
+  width: 100%;
+  padding: 10px 36px 10px 14px;
+  border: 1px solid #d5d9dd;
+  border-radius: 999px;
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.file-sidebar__search input:focus {
+  border-color: #4caf50;
+  box-shadow: 0 0 0 3px rgba(76, 175, 80, 0.15);
+}
+
+.file-sidebar__clear {
+  position: absolute;
+  right: 10px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: #9e9e9e;
+  font-size: 16px;
+  line-height: 1;
+  padding: 4px;
+}
+
+.file-sidebar__clear:hover {
+  color: #616161;
+}
+
 .file-sidebar__list {
   display: flex;
   flex-direction: column;
   gap: 12px;
   overflow: auto;
   padding-right: 8px;
+}
+
+.file-sidebar__empty {
+  text-align: center;
+  padding: 30px 12px;
+  color: #9e9e9e;
+  font-size: 14px;
+  border: 1px dashed #e0e0e0;
+  border-radius: 8px;
+  background: #fafafa;
 }
 
 .file-card {
