@@ -75,6 +75,7 @@ const PDFProcessor: React.FC = () => {
   const [globalError, setGlobalError] = useState<string>('');
   const [isGlobalProcessing, setIsGlobalProcessing] = useState<boolean>(false);
   const [isDownloadingAll, setIsDownloadingAll] = useState<boolean>(false);
+  const [zoomOverlay, setZoomOverlay] = useState<{ src: string; title: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const activeFile = useMemo(() => {
@@ -96,6 +97,15 @@ const PDFProcessor: React.FC = () => {
         [fileId]: updater(prevState),
       };
     });
+  };
+
+  const handleOpenZoomOverlay = (src: string | null | undefined, title: string) => {
+    if (!src) return;
+    setZoomOverlay({ src, title });
+  };
+
+  const handleCloseZoomOverlay = () => {
+    setZoomOverlay(null);
   };
 
   const processSingleFile = async (file: UploadedFile) => {
@@ -492,7 +502,18 @@ const PDFProcessor: React.FC = () => {
 
               <div className="viewer-section">
                 <div className="original-section">
-                  <h2>PDF gốc</h2>
+                  <div className="section-header">
+                    <h2>PDF gốc</h2>
+                    <button
+                      type="button"
+                      className="zoom-button"
+                      onClick={() => handleOpenZoomOverlay(activeState.currentImageData, 'PDF gốc')}
+                      disabled={!activeState.currentImageData}
+                      aria-label="Phóng to PDF gốc"
+                    >
+                      🔍
+                    </button>
+                  </div>
                   <PDFViewer
                     file={activeFile.file}
                     onPDFToImage={handlePDFToImage}
@@ -502,31 +523,44 @@ const PDFProcessor: React.FC = () => {
 
                 {previewImage && (
                   <div className="processed-section">
-                    <h2>Kết quả sau xử lý</h2>
-                    {hasBatchResult && (
-                      <div className="processed-preview-controls">
-                        <button onClick={() => handlePreviewChange(-1)} disabled={activeState.previewPageIndex === 0}>
-                          ← Trước
-                        </button>
-                        <span>
-                          Trang {activeState.previewPageIndex + 1} / {activeState.processedPages.length}
-                        </span>
-                        <button
-                          onClick={() => handlePreviewChange(1)}
-                          disabled={activeState.previewPageIndex >= activeState.processedPages.length - 1}
-                        >
-                          Sau →
-                        </button>
-                      </div>
-                    )}
-                    <div className="processed-image-container">
-                      <img src={previewImage} alt="Processed PDF preview" />
+                    <div className="section-header">
+                      <h2>Kết quả sau xử lý</h2>
+                      <button
+                        type="button"
+                        className="zoom-button"
+                        onClick={() => handleOpenZoomOverlay(previewImage, 'Kết quả sau xử lý')}
+                        disabled={!previewImage}
+                        aria-label="Phóng to kết quả sau xử lý"
+                      >
+                        🔍
+                      </button>
                     </div>
-                    {hasBatchResult && (
-                      <div className="batch-summary">
-                        Đã xử lý {activeState.processedPages.length} / {activeState.totalPages || activeState.processedPages.length} trang
+                    <div className="processed-content">
+                      {hasBatchResult && (
+                        <div className="processed-preview-controls">
+                          <button onClick={() => handlePreviewChange(-1)} disabled={activeState.previewPageIndex === 0}>
+                            ← Trước
+                          </button>
+                          <span>
+                            Trang {activeState.previewPageIndex + 1} / {activeState.processedPages.length}
+                          </span>
+                          <button
+                            onClick={() => handlePreviewChange(1)}
+                            disabled={activeState.previewPageIndex >= activeState.processedPages.length - 1}
+                          >
+                            Sau →
+                          </button>
+                        </div>
+                      )}
+                      <div className="processed-image-container">
+                        <img src={previewImage} alt="Processed PDF preview" />
                       </div>
-                    )}
+                      {hasBatchResult && (
+                        <div className="batch-summary">
+                          Đã xử lý {activeState.processedPages.length} / {activeState.totalPages || activeState.processedPages.length} trang
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
@@ -578,6 +612,23 @@ const PDFProcessor: React.FC = () => {
             <div className="empty-hint">Hãy chọn một file để tiếp tục.</div>
           )}
         </>
+      )}
+
+      {zoomOverlay && (
+        <div className="zoom-overlay" role="dialog" aria-modal="true" onClick={handleCloseZoomOverlay}>
+          <div className="zoom-overlay__content" onClick={(e) => e.stopPropagation()}>
+            <button
+              type="button"
+              className="zoom-overlay__close"
+              aria-label="Đóng phóng to"
+              onClick={handleCloseZoomOverlay}
+            >
+              ✕
+            </button>
+            <h3>{zoomOverlay.title}</h3>
+            <img src={zoomOverlay.src} alt={`Phóng to ${zoomOverlay.title}`} />
+          </div>
+        </div>
       )}
     </div>
   );
