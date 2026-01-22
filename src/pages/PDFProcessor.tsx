@@ -88,6 +88,11 @@ const PDFProcessor: React.FC = () => {
     ? fileStates[activeFile.id] ?? createInitialFileState()
     : createInitialFileState();
 
+  const anyFileProcessing = useMemo(() => {
+    if (isGlobalProcessing) return true;
+    return Object.values(fileStates).some((state) => state.isBatchProcessing);
+  }, [fileStates, isGlobalProcessing]);
+
   const updateFileState = (fileId: string, updater: (prev: FileProcessingState) => FileProcessingState) => {
     if (!fileId) return;
     setFileStates((prev) => {
@@ -277,6 +282,24 @@ const PDFProcessor: React.FC = () => {
     });
   };
 
+  const handleResetWorkspace = () => {
+    if (anyFileProcessing) {
+      setGlobalError('Đang xử lý, vui lòng đợi hoàn tất trước khi làm mới');
+      return;
+    }
+
+    setUploadedFiles([]);
+    setFileStates({});
+    setActiveFileId('');
+    setGlobalError('');
+    setZoomOverlay(null);
+    setIsDownloadingAll(false);
+
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
   const handlePDFToImage = (imageData: string) => {
     if (!activeFile) return;
     updateFileState(activeFile.id, (prev) => ({
@@ -412,6 +435,7 @@ const PDFProcessor: React.FC = () => {
     return getImageSources(state).length > 0;
   });
   const downloadAllDisabled = isGlobalProcessing || isDownloadingAll || !hasAnyProcessed;
+  const resetDisabled = anyFileProcessing || (uploadedFiles.length === 0 && !zoomOverlay && !globalError);
 
   const handlePreviewChange = (direction: number) => {
     if (!activeFile) return;
@@ -428,6 +452,17 @@ const PDFProcessor: React.FC = () => {
   return (
     <div className="pdf-processor-container">
       <h1>Xử lý PDF - Xóa đường viết màu đỏ</h1>
+      <div className="top-actions">
+        <button
+          type="button"
+          className="btn-refresh"
+          onClick={handleResetWorkspace}
+          disabled={resetDisabled}
+          aria-label="Làm mới workspace"
+        >
+          🔄 Làm mới workspace
+        </button>
+      </div>
 
       <div
         className={`upload-zone ${uploadedFiles.length ? 'upload-zone--compact' : ''}`}
@@ -459,37 +494,10 @@ const PDFProcessor: React.FC = () => {
       {uploadedFiles.length === 0 ? (
         <div className="empty-hint">Chưa có file nào được tải lên.</div>
       ) : (
-        <>
-          <div className="file-tabs">
-            {uploadedFiles.map((file) => {
-              const state = fileStates[file.id] ?? createInitialFileState();
-              const hasResult = state.processedPages.length > 0 || !!state.processedImageData;
-              return (
-                <button
-                  key={file.id}
-                  type="button"
-                  className={`file-tab ${activeFile?.id === file.id ? 'active' : ''}`}
-                  onClick={() => handleSelectFile(file.id)}
-                >
-                  <span className="file-tab-name">{file.name}</span>
-                  {hasResult && <span className="file-status-dot" title="Đã xử lý" />}
-                  <span
-                    className="file-tab-remove"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleRemoveFile(file.id);
-                    }}
-                    aria-label="Xóa file"
-                  >
-                    ✕
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-
-          {activeFile ? (
-            <div className="processing-area">
+        <div className="workspace-layout">
+          <div className="processing-column">
+            {activeFile ? (
+              <div className="processing-area">
               <div className="file-info">
                 <div className="file-name">
                   <span>📄 {activeFile.name}</span>
@@ -608,10 +616,86 @@ const PDFProcessor: React.FC = () => {
 
               {activeState.error && <div className="error-message">❌ {activeState.error}</div>}
             </div>
-          ) : (
-            <div className="empty-hint">Hãy chọn một file để tiếp tục.</div>
-          )}
-        </>
+            ) : (
+              <div className="empty-hint">Hãy chọn một file để tiếp tục.</div>
+            )}
+          </div>
+
+          <aside className="file-sidebar">
+            <div className="file-sidebar__inner">
+              <div className="file-sidebar__header">
+                <h3>Danh sách file</h3>
+                <span>{uploadedFiles.length} file</span>
+              </div>
+              <div className="file-sidebar__list">
+                {uploadedFiles.map((file) => {
+                  const state = fileStates[file.id] ?? createInitialFileState();
+                  const hasResult = getImageSources(state).length > 0;
+                  const sidebarStatus = state.isBatchProcessing
+                    ? 'Đang xử lý'
+                    : hasResult
+                      ? 'Đã xử lý'
+                      : 'Chưa xử lý';
+                  const totalPagesForProgress = state.batchProgress.total || state.totalPages || 0;
+                  const progressValue = totalPagesForProgress
+                    ? Math.min(
+                        100,
+                        Math.round((state.batchProgress.current / totalPagesForProgress) * 100)
+                      )
+                    : 0;
+
+                  return (
+                    <button
+                      key={file.id}
+                      type="button"
+                      className={`file-card ${activeFile?.id === file.id ? 'active' : ''}`}
+                      onClick={() => handleSelectFile(file.id)}
+                    >
+                      <div className="file-card__row">
+                        <span className="file-card__name">{file.name}</span>
+                        <span
+                          className="file-card__remove"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleRemoveFile(file.id);
+                          }}
+                          aria-label="Xóa file"
+                        >
+                          ✕
+                        </span>
+                      </div>
+                      <div className="file-card__meta">
+                        <span>
+                          {state.totalPages
+                            ? `${state.totalPages} trang`
+                            : state.isBatchProcessing
+                              ? 'Đang đọc số trang...'
+                              : 'Chưa đọc số trang'}
+                        </span>
+                        <span
+                          className={`file-card__badge ${
+                            state.isBatchProcessing
+                              ? 'file-card__badge--processing'
+                              : hasResult
+                                ? 'file-card__badge--done'
+                                : 'file-card__badge--pending'
+                          }`}
+                        >
+                          {sidebarStatus}
+                        </span>
+                      </div>
+                      {state.isBatchProcessing && totalPagesForProgress > 0 && (
+                        <div className="file-card__progress">
+                          <div style={{ width: `${progressValue}%` }} />
+                        </div>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </aside>
+        </div>
       )}
 
       {zoomOverlay && (

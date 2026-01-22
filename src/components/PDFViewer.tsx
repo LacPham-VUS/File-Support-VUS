@@ -5,6 +5,8 @@ import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 // Cấu hình worker cho pdf.js (tương thích Vite)
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
+const FIXED_SCALE = 1.25;
+
 interface PDFViewerProps {
   file: File | null;
   onPDFToImage?: (imageData: string) => void;
@@ -22,9 +24,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({ file, onPDFToImage, onDocumentLoa
 
   const [numPages, setNumPages] = useState<number>(0);
   const [pageNumber, setPageNumber] = useState<number>(1);
-  const [scale, setScale] = useState<number>(1.25);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string>('');
+  const [pagePreview, setPagePreview] = useState<string>('');
 
   const canRender = useMemo(() => !!file, [file]);
 
@@ -43,12 +45,14 @@ const PDFViewer: React.FC<PDFViewerProps> = ({ file, onPDFToImage, onDocumentLoa
         setNumPages(0);
         setPageNumber(1);
         setError('');
+        setPagePreview('');
         onDocumentLoadRef.current?.({ numPages: 0 });
         return;
       }
 
       setIsLoading(true);
       setError('');
+      setPagePreview('');
 
       try {
         const data = await file.arrayBuffer();
@@ -80,6 +84,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({ file, onPDFToImage, onDocumentLoa
         const message = e instanceof Error ? e.message : 'Không thể tải PDF';
         setError(message);
         setNumPages(0);
+        setPagePreview('');
         onDocumentLoadRef.current?.({ numPages: 0 });
       } finally {
         setIsLoading(false);
@@ -94,7 +99,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({ file, onPDFToImage, onDocumentLoa
 
   useEffect(() => {
     renderCacheRef.current.clear();
-  }, [scale, file]);
+  }, [file]);
 
   useEffect(() => {
     const render = async () => {
@@ -116,13 +121,14 @@ const PDFViewer: React.FC<PDFViewerProps> = ({ file, onPDFToImage, onDocumentLoa
       if (cached) {
         await drawCachedPage(canvas, cached, token, renderTokenRef);
         if (token === renderTokenRef.current) {
+          setPagePreview(cached.dataUrl);
           onPDFToImageRef.current?.(cached.dataUrl);
         }
         return;
       }
 
       const page = await pdfRef.current.getPage(pageNumber);
-      const viewport = page.getViewport({ scale });
+      const viewport = page.getViewport({ scale: FIXED_SCALE });
       if (!canvas) return;
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
@@ -152,6 +158,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({ file, onPDFToImage, onDocumentLoa
         pixelWidth: canvas.width,
         pixelHeight: canvas.height,
       });
+      setPagePreview(imageData);
       onPDFToImageRef.current?.(imageData);
     };
 
@@ -159,19 +166,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({ file, onPDFToImage, onDocumentLoa
       const message = e instanceof Error ? e.message : 'Không thể render PDF';
       setError(message);
     });
-  }, [isLoading, numPages, pageNumber, scale]);
-
-  const handleZoomIn = () => {
-    setScale((prev) => Math.min(prev + 0.2, 3.0));
-  };
-
-  const handleZoomOut = () => {
-    setScale((prev) => Math.max(prev - 0.2, 0.5));
-  };
-
-  const handleResetZoom = () => {
-    setScale(1.25);
-  };
+  }, [isLoading, numPages, pageNumber]);
 
   const handlePreviousPage = () => {
     setPageNumber((prev) => Math.max(prev - 1, 1));
@@ -186,21 +181,9 @@ const PDFViewer: React.FC<PDFViewerProps> = ({ file, onPDFToImage, onDocumentLoa
   }
 
   return (
-    <div className="pdf-viewer">
-      <div className="pdf-controls">
-        <div className="zoom-controls">
-          <button onClick={handleZoomOut} title="Thu nhỏ">
-            🔍−
-          </button>
-          <button onClick={handleResetZoom} title="Đặt lại">
-            {Math.round(scale * 100)}%
-          </button>
-          <button onClick={handleZoomIn} title="Phóng to">
-            🔍+
-          </button>
-        </div>
-        
-        <div className="page-controls">
+    <div className="pdf-viewer processed-content">
+      {numPages > 0 && (
+        <div className="processed-preview-controls">
           <button onClick={handlePreviousPage} disabled={pageNumber <= 1}>
             ← Trước
           </button>
@@ -211,16 +194,19 @@ const PDFViewer: React.FC<PDFViewerProps> = ({ file, onPDFToImage, onDocumentLoa
             Sau →
           </button>
         </div>
-      </div>
+      )}
 
-      <div className="pdf-document">
-        {!canRender ? null : isLoading ? (
-          <div>Đang tải PDF...</div>
-        ) : error ? (
+      <div className="pdf-document processed-image-container">
+        {!canRender ? null : error ? (
           <div style={{ color: '#c62828' }}>Không thể tải PDF: {error}</div>
+        ) : pagePreview ? (
+          <img src={pagePreview} alt={`Trang ${pageNumber} PDF gốc`} className="pdf-preview-image" />
+        ) : isLoading ? (
+          <div>Đang tải PDF...</div>
         ) : (
-          <canvas ref={canvasRef} />
+          <div>Đang chuẩn bị trang...</div>
         )}
+        <canvas ref={canvasRef} className="pdf-render-canvas" aria-hidden="true" />
       </div>
     </div>
   );
