@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import PDFViewer from '../components/PDFViewer';
@@ -24,6 +24,19 @@ type UploadedFile = {
   id: string;
   file: File;
   name: string;
+  dataUrl: string;
+};
+
+type PersistedFile = {
+  id: string;
+  name: string;
+  dataUrl: string;
+};
+
+type PersistedState = {
+  files: PersistedFile[];
+  fileStates: Record<string, FileProcessingState>;
+  activeFileId: string;
 };
 
 const createInitialFileState = (): FileProcessingState => ({
@@ -68,6 +81,30 @@ const buildPdfFromImages = async (imageSources: string[]): Promise<Uint8Array> =
   return pdfBytesCopy;
 };
 
+const STORAGE_KEY = 'pdf-processor-state-v1';
+
+const readFileAsDataUrl = (file: File): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(reader.error || new Error('Không thể đọc file'));
+    reader.readAsDataURL(file);
+  });
+};
+
+const dataUrlToFile = (dataUrl: string, filename: string): File => {
+  const [meta, base64] = dataUrl.split(',');
+  const mimeMatch = meta.match(/data:(.*?);base64/);
+  const mime = mimeMatch ? mimeMatch[1] : 'application/pdf';
+  const binary = atob(base64 || '');
+  const len = binary.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return new File([bytes], filename, { type: mime });
+};
+
 const PDFProcessor: React.FC = () => {
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [activeFileId, setActiveFileId] = useState<string>('');
@@ -75,9 +112,9 @@ const PDFProcessor: React.FC = () => {
   const [globalError, setGlobalError] = useState<string>('');
   const [isGlobalProcessing, setIsGlobalProcessing] = useState<boolean>(false);
   const [isDownloadingAll, setIsDownloadingAll] = useState<boolean>(false);
-  const [zoomOverlay, setZoomOverlay] = useState<{ src: string; title: string } | null>(null);
   const [fileSearchQuery, setFileSearchQuery] = useState<string>('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const hasHydratedRef = useRef<boolean>(false);
 
   const activeFile = useMemo(() => {
     if (!uploadedFiles.length) return null;
@@ -109,15 +146,6 @@ const PDFProcessor: React.FC = () => {
         [fileId]: updater(prevState),
       };
     });
-  };
-
-  const handleOpenZoomOverlay = (src: string | null | undefined, title: string) => {
-    if (!src) return;
-    setZoomOverlay({ src, title });
-  };
-
-  const handleCloseZoomOverlay = () => {
-    setZoomOverlay(null);
   };
 
   const processSingleFile = async (file: UploadedFile) => {
@@ -207,7 +235,7 @@ const PDFProcessor: React.FC = () => {
     }
   };
 
-  const handleFilesAdded = (files: File[]) => {
+  const handleFilesAdded = async (files: File[]) => {
     if (!files.length) return;
     if (isGlobalProcessing) {
       setGlobalError('Đang xử lý, vui lòng đợi hoàn tất trước khi thêm file mới');
@@ -219,12 +247,26 @@ const PDFProcessor: React.FC = () => {
       return;
     }
 
+    let newEntries: UploadedFile[] = [];
+    try {
+      newEntries = await Promise.all(
+        pdfFiles.map(async (file) => {
+          const dataUrl = await readFileAsDataUrl(file);
+          return {
+            id: generateFileId(file),
+            file,
+            name: file.name,
+            dataUrl,
+          };
+        })
+      );
+    } catch (error) {
+      setGlobalError('Không thể đọc file, vui lòng thử lại.');
+      return;
+    }
+
     setUploadedFiles((prev) => {
-      const newEntries = pdfFiles.map((file) => ({
-        id: generateFileId(file),
-        file,
-        name: file.name,
-      }));
+      const nextList = [...prev, ...newEntries];
 
       setFileStates((prevStates) => {
         const nextStates = { ...prevStates };
@@ -236,7 +278,7 @@ const PDFProcessor: React.FC = () => {
 
       setActiveFileId((current) => current || newEntries[0]?.id || '');
       setGlobalError('');
-      return [...prev, ...newEntries];
+      return nextList;
     });
 
     if (fileInputRef.current) {
@@ -244,15 +286,15 @@ const PDFProcessor: React.FC = () => {
     }
   };
 
-  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files ? Array.from(event.target.files) : [];
-    handleFilesAdded(files);
+    await handleFilesAdded(files);
   };
 
-  const handleDrop = (event: React.DragEvent<HTMLDivElement>) => {
+  const handleDrop = async (event: React.DragEvent<HTMLDivElement>) => {
     event.preventDefault();
     const files = Array.from(event.dataTransfer.files || []);
-    handleFilesAdded(files);
+    await handleFilesAdded(files);
   };
 
   const handleDragOver = (event: React.DragEvent<HTMLDivElement>) => {
@@ -299,8 +341,11 @@ const PDFProcessor: React.FC = () => {
     setFileStates({});
     setActiveFileId('');
     setGlobalError('');
-    setZoomOverlay(null);
     setIsDownloadingAll(false);
+
+    if (typeof window !== 'undefined') {
+      window.localStorage.removeItem(STORAGE_KEY);
+    }
 
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
@@ -442,10 +487,63 @@ const PDFProcessor: React.FC = () => {
     return getImageSources(state).length > 0;
   });
   const downloadAllDisabled = isGlobalProcessing || isDownloadingAll || !hasAnyProcessed;
-  const resetDisabled = anyFileProcessing || (uploadedFiles.length === 0 && !zoomOverlay && !globalError);
+  const resetDisabled = anyFileProcessing || (uploadedFiles.length === 0 && !globalError);
   const fileCountLabel = filteredFiles.length === uploadedFiles.length
     ? `${uploadedFiles.length} file`
     : `${filteredFiles.length}/${uploadedFiles.length} file`;
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) {
+      hasHydratedRef.current = true;
+      return;
+    }
+
+    try {
+      const parsed = JSON.parse(raw) as PersistedState;
+      const restoredFiles: UploadedFile[] = parsed.files.map((item) => ({
+        id: item.id,
+        name: item.name,
+        dataUrl: item.dataUrl,
+        file: dataUrlToFile(item.dataUrl, item.name),
+      }));
+
+      setUploadedFiles(restoredFiles);
+      setFileStates(parsed.fileStates ?? {});
+      const validActiveId = parsed.activeFileId && restoredFiles.find((f) => f.id === parsed.activeFileId)
+        ? parsed.activeFileId
+        : restoredFiles[0]?.id ?? '';
+      setActiveFileId(validActiveId);
+    } catch {
+      window.localStorage.removeItem(STORAGE_KEY);
+    } finally {
+      hasHydratedRef.current = true;
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (!hasHydratedRef.current) return;
+
+    if (!uploadedFiles.length && Object.keys(fileStates).length === 0) {
+      window.localStorage.removeItem(STORAGE_KEY);
+      return;
+    }
+
+    const payload: PersistedState = {
+      activeFileId,
+      files: uploadedFiles.map(({ id, name, dataUrl }) => ({ id, name, dataUrl })),
+      fileStates,
+    };
+
+    try {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+    } catch (error) {
+      // ignore quota errors or private mode
+      console.warn('Không thể lưu trạng thái cục bộ', error);
+    }
+  }, [uploadedFiles, fileStates, activeFileId]);
 
   const handlePreviewChange = (direction: number) => {
     if (!activeFile) return;
@@ -522,15 +620,6 @@ const PDFProcessor: React.FC = () => {
                 <div className="original-section">
                   <div className="section-header">
                     <h2>PDF gốc</h2>
-                    <button
-                      type="button"
-                      className="zoom-button"
-                      onClick={() => handleOpenZoomOverlay(activeState.currentImageData, 'PDF gốc')}
-                      disabled={!activeState.currentImageData}
-                      aria-label="Phóng to PDF gốc"
-                    >
-                      🔍
-                    </button>
                   </div>
                   <PDFViewer
                     file={activeFile.file}
@@ -543,15 +632,6 @@ const PDFProcessor: React.FC = () => {
                   <div className="processed-section">
                     <div className="section-header">
                       <h2>Kết quả sau xử lý</h2>
-                      <button
-                        type="button"
-                        className="zoom-button"
-                        onClick={() => handleOpenZoomOverlay(previewImage, 'Kết quả sau xử lý')}
-                        disabled={!previewImage}
-                        aria-label="Phóng to kết quả sau xử lý"
-                      >
-                        🔍
-                      </button>
                     </div>
                     <div className="processed-content">
                       {hasBatchResult && (
@@ -729,22 +809,6 @@ const PDFProcessor: React.FC = () => {
         </div>
       )}
 
-      {zoomOverlay && (
-        <div className="zoom-overlay" role="dialog" aria-modal="true" onClick={handleCloseZoomOverlay}>
-          <div className="zoom-overlay__content" onClick={(e) => e.stopPropagation()}>
-            <button
-              type="button"
-              className="zoom-overlay__close"
-              aria-label="Đóng phóng to"
-              onClick={handleCloseZoomOverlay}
-            >
-              ✕
-            </button>
-            <h3>{zoomOverlay.title}</h3>
-            <img src={zoomOverlay.src} alt={`Phóng to ${zoomOverlay.title}`} />
-          </div>
-        </div>
-      )}
     </div>
   );
 };
