@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react'
 import PDFProcessor from './pages/PDFProcessor'
 import Login from './pages/Login'
 import { AUTH_STORAGE_KEY } from './const/appConstants'
-import './App.css'
 
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false)

@@ -7,7 +7,6 @@ import { PDFDocument } from 'pdf-lib';
 import JSZip from 'jszip';
 import { DEFAULT_TOAST_DURATION_MS, MAX_UPLOAD_FILES, STORAGE_KEY } from '../const/appConstants';
 import type { FileProcessingState, PersistedState, Toast, UploadedFile } from '../models/appModels';
-import './PDFProcessor.css';
 
 // Use a real Worker instance to avoid dynamic-import failures in dev/prod
 pdfjsLib.GlobalWorkerOptions.workerPort = new pdfjsWorker();
@@ -581,208 +580,248 @@ const PDFProcessor: React.FC<PDFProcessorProps> = ({ onLogout }) => {
   };
 
   return (
-    <div className="pdf-processor-container">
-      <div className="toast-container" aria-live="polite" aria-atomic="true">
-        {toasts.map((toast) => (
-          <div key={toast.id} className={`toast toast--${toast.type}`}>
-            {toast.message}
-          </div>
-        ))}
-      </div>
-
-      <h1>Xử lý PDF - Xóa đường viết màu đỏ</h1>
-      <div className="top-actions">
-        <button
-          type="button"
-          className="btn-refresh"
-          onClick={handleResetWorkspace}
-          disabled={resetDisabled}
-          aria-label="Làm mới workspace"
-        >
-          🔄 Làm mới workspace
-        </button>
-        {onLogout && (
-          <button
-            type="button"
-            className="btn-secondary"
-            onClick={onLogout}
-            aria-label="Đăng xuất"
-          >
-            Đăng xuất
-          </button>
-        )}
-      </div>
-
-      {(() => {
-        const atLimit = uploadedFiles.length >= MAX_UPLOAD_FILES;
-        return (
-          <div
-            className={`upload-zone ${uploadedFiles.length ? 'upload-zone--compact' : ''}`}
-            onDrop={atLimit ? undefined : handleDrop}
-            onDragOver={atLimit ? undefined : handleDragOver}
-            onClick={atLimit ? undefined : () => fileInputRef.current?.click()}
-            style={atLimit ? { opacity: 0.7, cursor: 'not-allowed' } : undefined}
-          >
-        <div className="upload-content">
-          <div className="upload-icon">📄</div>
-          <p>
-            {atLimit
-              ? `Đã đạt giới hạn ${MAX_UPLOAD_FILES} file PDF`
-              : uploadedFiles.length
-                ? 'Thêm file PDF khác (có thể chọn nhiều)'
-                : 'Kéo thả file PDF vào đây hoặc click để chọn file'}
-          </p>
-          <small>
-            Đang có {uploadedFiles.length}/{MAX_UPLOAD_FILES} file. {atLimit ? 'Hãy xóa bớt để thêm mới.' : 'Kéo nhiều file cùng lúc để xử lý hàng loạt.'}
-          </small>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="application/pdf"
-            multiple
-            disabled={atLimit}
-            onChange={handleFileSelect}
-            style={{ display: 'none' }}
-          />
+    <div className="min-h-screen bg-slate-50">
+      <div className="max-w-7xl mx-auto px-0.5 sm:px-1 lg:px-2 py-8 space-y-6">
+        <div className="fixed top-4 right-4 z-50 flex flex-col gap-3" aria-live="polite" aria-atomic="true">
+          {toasts.map((toast) => {
+            const base = 'rounded-lg px-4 py-3 shadow-lg text-white font-semibold';
+            const tone = {
+              info: 'bg-sky-500',
+              success: 'bg-emerald-500',
+              warning: 'bg-amber-500 text-slate-900',
+              error: 'bg-rose-500',
+            }[toast.type];
+            return (
+              <div key={toast.id} className={`${base} ${tone}`}>
+                {toast.message}
+              </div>
+            );
+          })}
         </div>
-          </div>
-        );
-      })()}
 
-      {globalError && <div className="error-message">❌ {globalError}</div>}
-
-      {uploadedFiles.length === 0 ? (
-        <div className="empty-hint">Chưa có file nào được tải lên.</div>
-      ) : (
-        <div className="workspace-layout">
-          <div className="processing-column">
-            {activeFile ? (
-              <div className="processing-area">
-              <div className="file-info">
-                <div className="file-name">
-                  <span>📄 {activeFile.name}</span>
-                  {activeState.totalPages > 0 && <span className="file-meta">({activeState.totalPages} trang)</span>}
-                </div>
-                <button onClick={() => handleRemoveFile(activeFile.id)} className="btn-secondary">
-                  Xóa file này
-                </button>
-              </div>
-
-              <div className="viewer-section">
-                <div className="original-section">
-                  <div className="section-header">
-                    <h2>PDF gốc</h2>
-                  </div>
-                  <PDFViewer
-                    file={activeFile.file}
-                    onPDFToImage={handlePDFToImage}
-                    onDocumentLoad={handleDocumentLoad}
-                  />
-                </div>
-
-                {previewImage && (
-                  <div className="processed-section">
-                    <div className="section-header">
-                      <h2>Kết quả sau xử lý</h2>
-                    </div>
-                    <div className="processed-content">
-                      {hasBatchResult && (
-                        <div className="processed-preview-controls">
-                          <button onClick={() => handlePreviewChange(-1)} disabled={activeState.previewPageIndex === 0}>
-                            ← Trước
-                          </button>
-                          <span>
-                            Trang {activeState.previewPageIndex + 1} / {activeState.processedPages.length}
-                          </span>
-                          <button
-                            onClick={() => handlePreviewChange(1)}
-                            disabled={activeState.previewPageIndex >= activeState.processedPages.length - 1}
-                          >
-                            Sau →
-                          </button>
-                        </div>
-                      )}
-                      <div className="processed-image-container">
-                        <img src={previewImage} alt="Processed PDF preview" />
-                      </div>
-                      {hasBatchResult && (
-                        <div className="batch-summary">
-                          Đã xử lý {activeState.processedPages.length} / {activeState.totalPages || activeState.processedPages.length} trang
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <div className="action-buttons">
-                {hasUnprocessedFiles && (
-                  <button onClick={handleProcessAllFiles} disabled={processAllDisabled} className="btn-primary">
-                    {isGlobalProcessing
-                      ? '🌀 Đang xử lý tất cả file...'
-                      : uploadedFiles.length > 1
-                        ? '🤖 Xóa vết chấm của giáo viên trên tất cả file'
-                        : '🤖 Xóa vết chấm của giáo viên trên file này'}
-                  </button>
-                )}
-
-                {previewImage && (
-                  <button onClick={handleDownloadPdf} className="btn-success" disabled={downloadDisabled}>
-                    {hasBatchResult ? '⬇️ Tải xuống PDF (đa trang)' : '⬇️ Tải xuống (PDF)'}
-                  </button>
-                )}
-
-                {uploadedFiles.length > 1 && hasAnyProcessed && (
-                  <button
-                    onClick={handleDownloadAll}
-                    className="btn-secondary"
-                    disabled={downloadAllDisabled}
-                  >
-                    {isDownloadingAll ? '📦 Đang gom tất cả...' : '📦 Tải tất cả file đã xử lý'}
-                  </button>
-                )}
-              </div>
-
-              {activeState.batchProgress.total > 0 && (
-                <div
-                  className={`batch-progress ${
-                    !activeState.isBatchProcessing &&
-                    activeState.batchProgress.current === activeState.batchProgress.total
-                      ? 'completed'
-                      : ''
-                  }`}
-                >
-                  {activeState.isBatchProcessing
-                    ? `Đang xử lý ${Math.min(activeState.batchProgress.current, activeState.batchProgress.total)}/${activeState.batchProgress.total} trang...`
-                    : `Đã xử lý ${activeState.batchProgress.current}/${activeState.batchProgress.total} trang`}
-                </div>
-              )}
-
-              {activeState.error && <div className="error-message">❌ {activeState.error}</div>}
-            </div>
-            ) : (
-              <div className="empty-hint">Hãy chọn một file để tiếp tục.</div>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <h1 className="text-xl sm:text-2xl font-bold text-slate-800">Xử lý PDF - Xóa đường viết màu đỏ</h1>
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+            <button
+              type="button"
+              className="inline-flex items-center gap-2 rounded-full border border-emerald-600 px-4 py-2 text-emerald-700 font-semibold bg-white shadow-sm hover:bg-emerald-50 disabled:opacity-60 disabled:cursor-not-allowed"
+              onClick={handleResetWorkspace}
+              disabled={resetDisabled}
+              aria-label="Làm mới workspace"
+            >
+              🔄 Làm mới workspace
+            </button>
+            {onLogout && (
+              <button
+                type="button"
+                className="inline-flex items-center gap-2 rounded-full border border-rose-500 px-4 py-2 text-rose-600 font-semibold bg-white shadow-sm hover:bg-rose-50"
+                onClick={onLogout}
+                aria-label="Đăng xuất"
+              >
+                Đăng xuất
+              </button>
             )}
           </div>
+        </div>
 
-          <aside className="file-sidebar">
-            <div className="file-sidebar__inner">
-              <div className="file-sidebar__header">
-                <h3>Danh sách file</h3>
-                <span>{fileCountLabel}</span>
+        {(() => {
+          const atLimit = uploadedFiles.length >= MAX_UPLOAD_FILES;
+          return (
+            <div
+              className={`w-full rounded-xl border-2 border-dashed ${atLimit ? 'border-rose-300 bg-rose-50 text-rose-600' : 'border-emerald-300 bg-white text-slate-700'} ${uploadedFiles.length ? 'py-5 px-3 sm:px-4' : 'py-8 sm:py-10 px-4 sm:px-6'} transition text-center`}
+              onDrop={atLimit ? undefined : handleDrop}
+              onDragOver={atLimit ? undefined : handleDragOver}
+              onClick={atLimit ? undefined : () => fileInputRef.current?.click()}
+              style={atLimit ? { cursor: 'not-allowed' } : { cursor: 'pointer' }}
+            >
+              <div className="pointer-events-none flex flex-col items-center gap-2 text-center">
+                <div className="text-4xl sm:text-5xl">📄</div>
+                <p className="text-base sm:text-lg font-semibold">
+                  {atLimit
+                    ? `Đã đạt giới hạn ${MAX_UPLOAD_FILES} file PDF`
+                    : uploadedFiles.length
+                      ? 'Thêm file PDF khác (có thể chọn nhiều)'
+                      : 'Kéo thả file PDF vào đây hoặc click để chọn file'}
+                </p>
+                <p className="text-xs sm:text-sm text-slate-500">
+                  Đang có {uploadedFiles.length}/{MAX_UPLOAD_FILES} file. {atLimit ? 'Hãy xóa bớt để thêm mới.' : 'Kéo nhiều file cùng lúc để xử lý hàng loạt.'}
+                </p>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="application/pdf"
+                  multiple
+                  disabled={atLimit}
+                  onChange={handleFileSelect}
+                  className="hidden"
+                />
               </div>
-              <div className="file-sidebar__search">
+            </div>
+          );
+        })()}
+
+        {globalError && (
+          <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-rose-700 font-semibold">
+            ❌ {globalError}
+          </div>
+        )}
+
+        {uploadedFiles.length === 0 ? (
+          <div className="text-center text-slate-500 italic py-10">Chưa có file nào được tải lên.</div>
+        ) : (
+          <div className="grid gap-4 lg:grid-cols-[1fr,320px]">
+            <div className="flex flex-col gap-4">
+              {activeFile ? (
+                <div className="flex flex-col gap-4">
+                  <div className="flex flex-col gap-2 rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex flex-wrap items-baseline gap-2 text-slate-800 font-semibold">
+                      <span className="truncate">📄 {activeFile.name}</span>
+                      {activeState.totalPages > 0 && (
+                        <span className="text-sm font-medium text-slate-500">({activeState.totalPages} trang)</span>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => handleRemoveFile(activeFile.id)}
+                      className="inline-flex items-center gap-2 rounded-md bg-rose-500 px-3 py-2 text-white font-semibold shadow hover:bg-rose-600"
+                    >
+                      Xóa file này
+                    </button>
+                  </div>
+
+                  <div className="grid gap-4 lg:grid-cols-2">
+                    <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm flex flex-col gap-3 min-h-[320px]">
+                      <div className="flex items-center gap-2">
+                        <h2 className="text-lg font-semibold text-slate-800">PDF gốc</h2>
+                      </div>
+                      <div className="flex-1 min-h-[280px]">
+                        <PDFViewer
+                          file={activeFile.file}
+                          onPDFToImage={handlePDFToImage}
+                          onDocumentLoad={handleDocumentLoad}
+                        />
+                      </div>
+                    </div>
+
+                    {previewImage && (
+                      <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm flex flex-col gap-3 min-h-[320px]">
+                        <div className="flex items-center gap-2">
+                          <h2 className="text-lg font-semibold text-slate-800">Kết quả sau xử lý</h2>
+                        </div>
+                        <div className="flex-1 flex flex-col gap-3">
+                          {hasBatchResult && (
+                            <div className="flex items-center justify-center gap-3">
+                              <button
+                                onClick={() => handlePreviewChange(-1)}
+                                disabled={activeState.previewPageIndex === 0}
+                                className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm disabled:opacity-50"
+                              >
+                                ← Trước
+                              </button>
+                              <span className="text-sm text-slate-700">
+                                Trang {activeState.previewPageIndex + 1} / {activeState.processedPages.length}
+                              </span>
+                              <button
+                                onClick={() => handlePreviewChange(1)}
+                                disabled={activeState.previewPageIndex >= activeState.processedPages.length - 1}
+                                className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm disabled:opacity-50"
+                              >
+                                Sau →
+                              </button>
+                            </div>
+                          )}
+                          <div className="flex-1 overflow-auto rounded-md border border-slate-200 bg-slate-50 p-3 flex justify-center items-center max-h-[70vh]">
+                            <img src={previewImage} alt="Processed PDF preview" className="max-w-full h-auto shadow" />
+                          </div>
+                          {hasBatchResult && (
+                            <div className="text-center text-sm font-semibold text-emerald-600">
+                              Đã xử lý {activeState.processedPages.length} / {activeState.totalPages || activeState.processedPages.length} trang
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center justify-center gap-3 rounded-lg bg-white px-4 py-3 shadow-sm border border-slate-200">
+                    {hasUnprocessedFiles && (
+                      <button
+                        onClick={handleProcessAllFiles}
+                        disabled={processAllDisabled}
+                        className="inline-flex w-full sm:w-auto items-center gap-2 rounded-md bg-emerald-600 px-4 py-3 text-white font-semibold shadow hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed"
+                      >
+                        {isGlobalProcessing
+                          ? '🌀 Đang xử lý tất cả file...'
+                          : uploadedFiles.length > 1
+                            ? '🤖 Xóa vết chấm của giáo viên trên tất cả file'
+                            : '🤖 Xóa vết chấm của giáo viên trên file này'}
+                      </button>
+                    )}
+
+                    {previewImage && (
+                      <button
+                        onClick={handleDownloadPdf}
+                        className="inline-flex w-full sm:w-auto items-center gap-2 rounded-md bg-sky-600 px-4 py-3 text-white font-semibold shadow hover:bg-sky-700 disabled:opacity-60 disabled:cursor-not-allowed"
+                        disabled={downloadDisabled}
+                      >
+                        {hasBatchResult ? '⬇️ Tải xuống PDF (đa trang)' : '⬇️ Tải xuống (PDF)'}
+                      </button>
+                    )}
+
+                    {uploadedFiles.length > 1 && hasAnyProcessed && (
+                      <button
+                        onClick={handleDownloadAll}
+                        className="inline-flex w-full sm:w-auto items-center gap-2 rounded-md bg-amber-500 px-4 py-3 text-white font-semibold shadow hover:bg-amber-600 disabled:opacity-60 disabled:cursor-not-allowed"
+                        disabled={downloadAllDisabled}
+                      >
+                        {isDownloadingAll ? '📦 Đang gom tất cả...' : '📦 Tải tất cả file đã xử lý'}
+                      </button>
+                    )}
+                  </div>
+
+                  {activeState.batchProgress.total > 0 && (
+                    <div
+                      className={`rounded-md border px-4 py-3 text-sm font-semibold shadow-sm ${
+                        !activeState.isBatchProcessing &&
+                        activeState.batchProgress.current === activeState.batchProgress.total
+                          ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                          : 'border-amber-200 bg-amber-50 text-amber-700'
+                      }`}
+                    >
+                      {activeState.isBatchProcessing
+                        ? `Đang xử lý ${Math.min(activeState.batchProgress.current, activeState.batchProgress.total)}/${activeState.batchProgress.total} trang...`
+                        : `Đã xử lý ${activeState.batchProgress.current}/${activeState.batchProgress.total} trang`}
+                    </div>
+                  )}
+
+                  {activeState.error && (
+                    <div className="rounded-md border border-rose-200 bg-rose-50 px-4 py-3 text-rose-700 font-semibold">
+                      ❌ {activeState.error}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="text-center text-slate-500 italic py-10">Hãy chọn một file để tiếp tục.</div>
+              )}
+            </div>
+
+            <aside className="rounded-lg border border-slate-200 bg-white shadow-sm p-4 flex flex-col gap-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-semibold text-slate-800">Danh sách file</h3>
+                <span className="text-sm text-slate-500">{fileCountLabel}</span>
+              </div>
+              <div className="relative">
                 <input
                   type="text"
                   value={fileSearchQuery}
                   placeholder="Tìm theo tên file..."
                   onChange={(event) => setFileSearchQuery(event.target.value)}
                   aria-label="Tìm kiếm file theo tên"
+                  className="w-full rounded-full border border-slate-200 px-4 py-2 pr-10 text-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-100"
                 />
                 {fileSearchQuery && (
                   <button
                     type="button"
-                    className="file-sidebar__clear"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full px-2 text-slate-500 hover:bg-slate-100"
                     onClick={() => setFileSearchQuery('')}
                     aria-label="Xóa từ khóa tìm kiếm"
                   >
@@ -790,7 +829,7 @@ const PDFProcessor: React.FC<PDFProcessorProps> = ({ onLogout }) => {
                   </button>
                 )}
               </div>
-              <div className="file-sidebar__list">
+              <div className="flex flex-col gap-2 overflow-auto pr-1 max-h-[70vh]">
                 {filteredFiles.length ? filteredFiles.map((file) => {
                   const state = fileStates[file.id] ?? createInitialFileState();
                   const hasResult = getImageSources(state).length > 0;
@@ -811,13 +850,13 @@ const PDFProcessor: React.FC<PDFProcessorProps> = ({ onLogout }) => {
                     <button
                       key={file.id}
                       type="button"
-                      className={`file-card ${activeFile?.id === file.id ? 'active' : ''}`}
+                      className={`w-full rounded-lg border px-3 py-2 text-left shadow-sm transition hover:shadow ${activeFile?.id === file.id ? 'border-emerald-300 bg-emerald-50' : 'border-slate-200 bg-white'}`}
                       onClick={() => handleSelectFile(file.id)}
                     >
-                      <div className="file-card__row">
-                        <span className="file-card__name">{file.name}</span>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-semibold text-slate-800 truncate">{file.name}</span>
                         <span
-                          className="file-card__remove"
+                          className="text-rose-500 font-bold"
                           onClick={(e) => {
                             e.stopPropagation();
                             handleRemoveFile(file.id);
@@ -827,7 +866,7 @@ const PDFProcessor: React.FC<PDFProcessorProps> = ({ onLogout }) => {
                           ✕
                         </span>
                       </div>
-                      <div className="file-card__meta">
+                      <div className="mt-1 flex items-center justify-between text-sm text-slate-600">
                         <span>
                           {state.totalPages
                             ? `${state.totalPages} trang`
@@ -836,33 +875,34 @@ const PDFProcessor: React.FC<PDFProcessorProps> = ({ onLogout }) => {
                               : 'Chưa đọc số trang'}
                         </span>
                         <span
-                          className={`file-card__badge ${
+                          className={`rounded-full px-2 py-1 text-xs font-semibold ${
                             state.isBatchProcessing
-                              ? 'file-card__badge--processing'
+                              ? 'bg-amber-100 text-amber-700'
                               : hasResult
-                                ? 'file-card__badge--done'
-                                : 'file-card__badge--pending'
+                                ? 'bg-emerald-100 text-emerald-700'
+                                : 'bg-slate-100 text-slate-600'
                           }`}
                         >
                           {sidebarStatus}
                         </span>
                       </div>
                       {state.isBatchProcessing && totalPagesForProgress > 0 && (
-                        <div className="file-card__progress">
-                          <div style={{ width: `${progressValue}%` }} />
+                        <div className="mt-2 h-2 rounded-full bg-slate-100">
+                          <div className="h-2 rounded-full bg-gradient-to-r from-emerald-500 to-lime-400" style={{ width: `${progressValue}%` }} />
                         </div>
                       )}
                     </button>
                   );
                 }) : (
-                  <div className="file-sidebar__empty">Không tìm thấy file phù hợp.</div>
+                  <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-6 text-center text-sm text-slate-500">
+                    Không tìm thấy file phù hợp.
+                  </div>
                 )}
               </div>
-            </div>
-          </aside>
-        </div>
-      )}
-
+            </aside>
+          </div>
+        )}
+      </div>
     </div>
   );
 };

@@ -181,32 +181,40 @@ const PDFViewer: React.FC<PDFViewerProps> = ({ file, onPDFToImage, onDocumentLoa
   }
 
   return (
-    <div className="pdf-viewer processed-content">
+    <div className="flex h-full flex-col gap-3 max-h-[70vh]">
       {numPages > 0 && (
-        <div className="processed-preview-controls">
-          <button onClick={handlePreviousPage} disabled={pageNumber <= 1}>
+        <div className="flex items-center justify-center gap-3 text-sm text-slate-700">
+          <button
+            onClick={handlePreviousPage}
+            disabled={pageNumber <= 1}
+            className="rounded-md border border-slate-200 bg-white px-3 py-2 font-semibold shadow-sm disabled:opacity-50"
+          >
             ← Trước
           </button>
           <span>
             Trang {pageNumber} / {numPages}
           </span>
-          <button onClick={handleNextPage} disabled={pageNumber >= numPages}>
+          <button
+            onClick={handleNextPage}
+            disabled={pageNumber >= numPages}
+            className="rounded-md border border-slate-200 bg-white px-3 py-2 font-semibold shadow-sm disabled:opacity-50"
+          >
             Sau →
           </button>
         </div>
       )}
 
-      <div className="pdf-document processed-image-container">
+      <div className="relative flex-1 overflow-auto rounded-md border border-slate-200 bg-slate-50 p-3">
         {!canRender ? null : error ? (
-          <div style={{ color: '#c62828' }}>Không thể tải PDF: {error}</div>
+          <div className="text-rose-600 font-semibold">Không thể tải PDF: {error}</div>
         ) : pagePreview ? (
-          <img src={pagePreview} alt={`Trang ${pageNumber} PDF gốc`} className="pdf-preview-image" />
+          <img src={pagePreview} alt={`Trang ${pageNumber} PDF gốc`} className="mx-auto max-w-full h-auto shadow" />
         ) : isLoading ? (
-          <div>Đang tải PDF...</div>
+          <div className="text-sm text-slate-600">Đang tải PDF...</div>
         ) : (
-          <div>Đang chuẩn bị trang...</div>
+          <div className="text-sm text-slate-600">Đang chuẩn bị trang...</div>
         )}
-        <canvas ref={canvasRef} className="pdf-render-canvas" aria-hidden="true" />
+        <canvas ref={canvasRef} className="absolute inset-0 opacity-0 pointer-events-none" aria-hidden="true" />
       </div>
     </div>
   );
