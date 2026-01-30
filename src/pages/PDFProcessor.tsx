@@ -7,6 +7,15 @@ import { PDFDocument } from 'pdf-lib';
 import JSZip from 'jszip';
 import { DEFAULT_TOAST_DURATION_MS, MAX_UPLOAD_FILES, STORAGE_KEY } from '../const/appConstants';
 import type { FileProcessingState, PersistedState, Toast, UploadedFile } from '../models/appModels';
+import {
+  saveFileData,
+  loadFileData,
+  deleteFileData,
+  saveFileState,
+  loadFileState,
+  deleteFileState,
+  clearAllStorage,
+} from '../services/storageService';
 
 // Use a real Worker instance to avoid dynamic-import failures in dev/prod
 pdfjsLib.GlobalWorkerOptions.workerPort = new pdfjsWorker();
@@ -299,6 +308,13 @@ const PDFProcessor: React.FC<PDFProcessorProps> = ({ onLogout }) => {
       return nextList;
     });
 
+    // Lưu dataUrl vào IndexedDB để giữ sau reload
+    try {
+      await Promise.all(newEntries.map((f) => saveFileData(f.id, f.dataUrl)));
+    } catch (error) {
+      console.warn('Không thể lưu dữ liệu file vào bộ nhớ cục bộ', error);
+    }
+
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -347,6 +363,10 @@ const PDFProcessor: React.FC<PDFProcessorProps> = ({ onLogout }) => {
       delete next[id];
       return next;
     });
+
+    // Xóa dữ liệu lưu trong IndexedDB
+    deleteFileData(id).catch(() => {});
+    deleteFileState(id).catch(() => {});
   };
 
   const handleResetWorkspace = () => {
@@ -364,6 +384,8 @@ const PDFProcessor: React.FC<PDFProcessorProps> = ({ onLogout }) => {
     if (typeof window !== 'undefined') {
       window.localStorage.removeItem(STORAGE_KEY);
     }
+
+    clearAllStorage().catch(() => {});
 
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
@@ -522,49 +544,80 @@ const PDFProcessor: React.FC<PDFProcessorProps> = ({ onLogout }) => {
       return;
     }
 
-    try {
-      const parsed = JSON.parse(raw) as PersistedState;
-      const restoredFiles: UploadedFile[] = parsed.files.map((item) => ({
-        id: item.id,
-        name: item.name,
-        dataUrl: item.dataUrl,
-        file: dataUrlToFile(item.dataUrl, item.name),
-      }));
+    (async () => {
+      try {
+        const parsed = JSON.parse(raw) as PersistedState;
+        const restoredFiles: UploadedFile[] = [];
+        for (const item of parsed.files) {
+          const dataUrl = await loadFileData(item.id);
+          if (!dataUrl) continue;
+          restoredFiles.push({
+            id: item.id,
+            name: item.name,
+            dataUrl,
+            file: dataUrlToFile(dataUrl, item.name),
+          });
+        }
 
-      setUploadedFiles(restoredFiles);
-      setFileStates(parsed.fileStates ?? {});
-      const validActiveId = parsed.activeFileId && restoredFiles.find((f) => f.id === parsed.activeFileId)
-        ? parsed.activeFileId
-        : restoredFiles[0]?.id ?? '';
-      setActiveFileId(validActiveId);
-    } catch {
-      window.localStorage.removeItem(STORAGE_KEY);
-    } finally {
-      hasHydratedRef.current = true;
-    }
+        const restoredStates: Record<string, FileProcessingState> = {};
+        for (const file of restoredFiles) {
+          const state = await loadFileState(file.id);
+          restoredStates[file.id] = state ?? createInitialFileState();
+        }
+
+        setUploadedFiles(restoredFiles);
+        setFileStates(restoredStates);
+        const validActiveId = parsed.activeFileId && restoredFiles.find((f) => f.id === parsed.activeFileId)
+          ? parsed.activeFileId
+          : restoredFiles[0]?.id ?? '';
+        setActiveFileId(validActiveId);
+      } catch {
+        window.localStorage.removeItem(STORAGE_KEY);
+        await clearAllStorage();
+      } finally {
+        hasHydratedRef.current = true;
+      }
+    })();
   }, []);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
     if (!hasHydratedRef.current) return;
 
-    if (!uploadedFiles.length && Object.keys(fileStates).length === 0) {
-      window.localStorage.removeItem(STORAGE_KEY);
-      return;
-    }
+    (async () => {
+      if (!uploadedFiles.length && Object.keys(fileStates).length === 0) {
+        window.localStorage.removeItem(STORAGE_KEY);
+        await clearAllStorage();
+        return;
+      }
 
-    const payload: PersistedState = {
-      activeFileId,
-      files: uploadedFiles.map(({ id, name, dataUrl }) => ({ id, name, dataUrl })),
-      fileStates,
-    };
+      const payload: PersistedState = {
+        activeFileId,
+        files: uploadedFiles.map(({ id, name }) => ({ id, name, dataUrl: '' })),
+        fileStates: {},
+      };
 
-    try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
-    } catch (error) {
-      // ignore quota errors or private mode
-      console.warn('Không thể lưu trạng thái cục bộ', error);
-    }
+      try {
+        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+      } catch (error) {
+        console.warn('Không thể lưu trạng thái cục bộ', error);
+      }
+
+      // Persist file data and states in IndexedDB
+      await Promise.all(
+        uploadedFiles.map(async (file) => {
+          try {
+            await saveFileData(file.id, file.dataUrl);
+            const state = fileStates[file.id];
+            if (state) {
+              await saveFileState(file.id, state);
+            }
+          } catch (error) {
+            console.warn('Không thể lưu dữ liệu file', error);
+          }
+        })
+      );
+    })();
   }, [uploadedFiles, fileStates, activeFileId]);
 
   const handlePreviewChange = (direction: number) => {
