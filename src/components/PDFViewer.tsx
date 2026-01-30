@@ -1,9 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
-import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?worker';
 
-// Cấu hình worker cho pdf.js (tương thích Vite)
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
+// Dùng Worker instance để tránh lỗi dynamic import trong dev/prod
+pdfjsLib.GlobalWorkerOptions.workerPort = new pdfjsWorker();
 
 const FIXED_SCALE = 1.25;
 

@@ -1,43 +1,16 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
-import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?worker';
 import PDFViewer from '../components/PDFViewer';
 import { removeRedMarkings } from '../services/geminiService';
 import { PDFDocument } from 'pdf-lib';
 import JSZip from 'jszip';
+import { DEFAULT_TOAST_DURATION_MS, MAX_UPLOAD_FILES, STORAGE_KEY } from '../const/appConstants';
+import type { FileProcessingState, PersistedState, Toast, UploadedFile } from '../models/appModels';
 import './PDFProcessor.css';
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
-
-type FileProcessingState = {
-  currentImageData: string;
-  processedImageData: string;
-  processedPages: string[];
-  previewPageIndex: number;
-  batchProgress: { current: number; total: number };
-  totalPages: number;
-  isBatchProcessing: boolean;
-  error: string;
-};
-
-type UploadedFile = {
-  id: string;
-  file: File;
-  name: string;
-  dataUrl: string;
-};
-
-type PersistedFile = {
-  id: string;
-  name: string;
-  dataUrl: string;
-};
-
-type PersistedState = {
-  files: PersistedFile[];
-  fileStates: Record<string, FileProcessingState>;
-  activeFileId: string;
-};
+// Use a real Worker instance to avoid dynamic-import failures in dev/prod
+pdfjsLib.GlobalWorkerOptions.workerPort = new pdfjsWorker();
 
 const createInitialFileState = (): FileProcessingState => ({
   currentImageData: '',
@@ -81,8 +54,6 @@ const buildPdfFromImages = async (imageSources: string[]): Promise<Uint8Array> =
   return pdfBytesCopy;
 };
 
-const STORAGE_KEY = 'pdf-processor-state-v1';
-
 const readFileAsDataUrl = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -105,7 +76,11 @@ const dataUrlToFile = (dataUrl: string, filename: string): File => {
   return new File([bytes], filename, { type: mime });
 };
 
-const PDFProcessor: React.FC = () => {
+type PDFProcessorProps = {
+  onLogout?: () => void;
+};
+
+const PDFProcessor: React.FC<PDFProcessorProps> = ({ onLogout }) => {
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [activeFileId, setActiveFileId] = useState<string>('');
   const [fileStates, setFileStates] = useState<Record<string, FileProcessingState>>({});
@@ -113,8 +88,30 @@ const PDFProcessor: React.FC = () => {
   const [isGlobalProcessing, setIsGlobalProcessing] = useState<boolean>(false);
   const [isDownloadingAll, setIsDownloadingAll] = useState<boolean>(false);
   const [fileSearchQuery, setFileSearchQuery] = useState<string>('');
+  const [toasts, setToasts] = useState<Toast[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const hasHydratedRef = useRef<boolean>(false);
+
+  const createToastId = () => {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID();
+    }
+    return `toast-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  };
+
+  const showToast = (message: string, type: Toast['type'] = 'info', durationMs = DEFAULT_TOAST_DURATION_MS) => {
+    const id = createToastId();
+    setToasts((prev) => {
+      if (prev.some((toast) => toast.message === message && toast.type === type)) {
+        return prev;
+      }
+      return [...prev, { id, message, type }];
+    });
+
+    window.setTimeout(() => {
+      setToasts((prev) => prev.filter((toast) => toast.id !== id));
+    }, durationMs);
+  };
 
   const activeFile = useMemo(() => {
     if (!uploadedFiles.length) return null;
@@ -239,18 +236,36 @@ const PDFProcessor: React.FC = () => {
     if (!files.length) return;
     if (isGlobalProcessing) {
       setGlobalError('Đang xử lý, vui lòng đợi hoàn tất trước khi thêm file mới');
+      showToast('Đang xử lý, vui lòng đợi hoàn tất trước khi thêm file mới', 'warning');
       return;
     }
+
+    // Giới hạn tổng số file upload
+    const remainingSlots = Math.max(MAX_UPLOAD_FILES - uploadedFiles.length, 0);
+    if (remainingSlots === 0) {
+      setGlobalError(`Chỉ được upload tối đa ${MAX_UPLOAD_FILES} file PDF`);
+      showToast(`Chỉ được upload tối đa ${MAX_UPLOAD_FILES} file PDF`, 'warning');
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+
     const pdfFiles = files.filter((file) => file.type === 'application/pdf');
     if (!pdfFiles.length) {
       setGlobalError('Vui lòng chọn file PDF');
+      showToast('Vui lòng chọn file PDF', 'warning');
       return;
+    }
+
+    const limitedPdfFiles = pdfFiles.slice(0, remainingSlots);
+    if (pdfFiles.length > remainingSlots) {
+      setGlobalError(`Chỉ được upload tối đa ${MAX_UPLOAD_FILES} file PDF (đã lấy ${remainingSlots} file đầu tiên)`);
+      showToast(`Đã lấy ${remainingSlots}/${pdfFiles.length} file (giới hạn ${MAX_UPLOAD_FILES} file)`, 'warning');
     }
 
     let newEntries: UploadedFile[] = [];
     try {
       newEntries = await Promise.all(
-        pdfFiles.map(async (file) => {
+        limitedPdfFiles.map(async (file) => {
           const dataUrl = await readFileAsDataUrl(file);
           return {
             id: generateFileId(file),
@@ -262,6 +277,7 @@ const PDFProcessor: React.FC = () => {
       );
     } catch (error) {
       setGlobalError('Không thể đọc file, vui lòng thử lại.');
+      showToast('Không thể đọc file, vui lòng thử lại.', 'error');
       return;
     }
 
@@ -277,7 +293,10 @@ const PDFProcessor: React.FC = () => {
       });
 
       setActiveFileId((current) => current || newEntries[0]?.id || '');
-      setGlobalError('');
+      if (!globalError) setGlobalError('');
+      if (newEntries.length) {
+        showToast(`Đã thêm ${newEntries.length} file PDF`, 'success');
+      }
       return nextList;
     });
 
@@ -486,6 +505,10 @@ const PDFProcessor: React.FC = () => {
     const state = fileStates[file.id] ?? createInitialFileState();
     return getImageSources(state).length > 0;
   });
+  const hasUnprocessedFiles = uploadedFiles.some((file) => {
+    const state = fileStates[file.id] ?? createInitialFileState();
+    return getImageSources(state).length === 0;
+  });
   const downloadAllDisabled = isGlobalProcessing || isDownloadingAll || !hasAnyProcessed;
   const resetDisabled = anyFileProcessing || (uploadedFiles.length === 0 && !globalError);
   const fileCountLabel = filteredFiles.length === uploadedFiles.length
@@ -559,6 +582,14 @@ const PDFProcessor: React.FC = () => {
 
   return (
     <div className="pdf-processor-container">
+      <div className="toast-container" aria-live="polite" aria-atomic="true">
+        {toasts.map((toast) => (
+          <div key={toast.id} className={`toast toast--${toast.type}`}>
+            {toast.message}
+          </div>
+        ))}
+      </div>
+
       <h1>Xử lý PDF - Xóa đường viết màu đỏ</h1>
       <div className="top-actions">
         <button
@@ -570,32 +601,53 @@ const PDFProcessor: React.FC = () => {
         >
           🔄 Làm mới workspace
         </button>
+        {onLogout && (
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={onLogout}
+            aria-label="Đăng xuất"
+          >
+            Đăng xuất
+          </button>
+        )}
       </div>
 
-      <div
-        className={`upload-zone ${uploadedFiles.length ? 'upload-zone--compact' : ''}`}
-        onDrop={handleDrop}
-        onDragOver={handleDragOver}
-        onClick={() => fileInputRef.current?.click()}
-      >
+      {(() => {
+        const atLimit = uploadedFiles.length >= MAX_UPLOAD_FILES;
+        return (
+          <div
+            className={`upload-zone ${uploadedFiles.length ? 'upload-zone--compact' : ''}`}
+            onDrop={atLimit ? undefined : handleDrop}
+            onDragOver={atLimit ? undefined : handleDragOver}
+            onClick={atLimit ? undefined : () => fileInputRef.current?.click()}
+            style={atLimit ? { opacity: 0.7, cursor: 'not-allowed' } : undefined}
+          >
         <div className="upload-content">
           <div className="upload-icon">📄</div>
           <p>
-            {uploadedFiles.length
-              ? 'Thêm file PDF khác (có thể chọn nhiều)'
-              : 'Kéo thả file PDF vào đây hoặc click để chọn file'}
+            {atLimit
+              ? `Đã đạt giới hạn ${MAX_UPLOAD_FILES} file PDF`
+              : uploadedFiles.length
+                ? 'Thêm file PDF khác (có thể chọn nhiều)'
+                : 'Kéo thả file PDF vào đây hoặc click để chọn file'}
           </p>
-          <small>Kéo nhiều file cùng lúc để xử lý hàng loạt.</small>
+          <small>
+            Đang có {uploadedFiles.length}/{MAX_UPLOAD_FILES} file. {atLimit ? 'Hãy xóa bớt để thêm mới.' : 'Kéo nhiều file cùng lúc để xử lý hàng loạt.'}
+          </small>
           <input
             ref={fileInputRef}
             type="file"
             accept="application/pdf"
             multiple
+            disabled={atLimit}
             onChange={handleFileSelect}
             style={{ display: 'none' }}
           />
         </div>
-      </div>
+          </div>
+        );
+      })()}
 
       {globalError && <div className="error-message">❌ {globalError}</div>}
 
@@ -664,13 +716,15 @@ const PDFProcessor: React.FC = () => {
               </div>
 
               <div className="action-buttons">
-                <button onClick={handleProcessAllFiles} disabled={processAllDisabled} className="btn-primary">
-                  {isGlobalProcessing
-                    ? '🌀 Đang xử lý tất cả file...'
-                    : uploadedFiles.length > 1
-                      ? '🤖 Xóa vết chấm của giáo viên trên tất cả file'
-                      : '🤖 Xóa vết chấm của giáo viên trên file này'}
-                </button>
+                {hasUnprocessedFiles && (
+                  <button onClick={handleProcessAllFiles} disabled={processAllDisabled} className="btn-primary">
+                    {isGlobalProcessing
+                      ? '🌀 Đang xử lý tất cả file...'
+                      : uploadedFiles.length > 1
+                        ? '🤖 Xóa vết chấm của giáo viên trên tất cả file'
+                        : '🤖 Xóa vết chấm của giáo viên trên file này'}
+                  </button>
+                )}
 
                 {previewImage && (
                   <button onClick={handleDownloadPdf} className="btn-success" disabled={downloadDisabled}>
